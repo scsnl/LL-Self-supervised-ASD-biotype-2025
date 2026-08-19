@@ -4,8 +4,9 @@
 Step 8: Neurobiological Gradient Axis Analysis
 ================================================
 Constructs a one-dimensional neurobiological gradient axis by:
-  1. Computing pairwise Cohen's d matrices (S1, S2, S3, TDC) for each metric
-  2. Projecting onto 1-D via MDS on |Cohen's d|
+  1. Computing pairwise normalized mean differences (delta-mu / SD_all) between
+     groups (S1, S2, S3, TDC) for each metric
+  2. Projecting onto 1-D via MDS on the absolute normalized mean differences
   3. Omnibus Kruskal-Wallis (S1 vs S2 vs S3)
   4. Pairwise Mann-Whitney U + FDR correction (S1-S2, S1-S3, S2-S3)
   5. Visualize: each metric = one row, one column per cohort
@@ -18,7 +19,7 @@ Metrics (30 total per subject):
   - Network-pair FC: all 15 pairs among 6 DevAtlas6 networks (15)
 
 NOTE: Step6 IG scores are group-level prototypes (one value per subtype),
-      not per-subject measurements. They cannot be used in Cohen's d / MDS
+      not per-subject measurements. They cannot be used in the normalized mean difference / MDS
       analysis (zero within-group variance). They are excluded here.
 
 Usage:
@@ -604,10 +605,18 @@ def fdr_bh(p_values: list[float]) -> np.ndarray:
     return p_adj
 
 
-def cohens_d(a: np.ndarray, b: np.ndarray, all_vals: np.ndarray) -> float:
-    """Cohen's d using pooled SD of the combined four-group sample.
+def normalized_mean_difference(a: np.ndarray, b: np.ndarray,
+                               all_vals: np.ndarray) -> float:
+    """Normalized mean difference between two groups: (mean_a - mean_b) / SD_all.
 
-    Denominator is std(all_vals) to handle unequal group sizes across cohorts.
+    The denominator is the standard deviation of the combined four-group sample
+    (std(all_vals)), which keeps the metric stable when group sizes are unequal
+    and when cohorts are small. Note that this is NOT Cohen's d: the denominator
+    is not a pooled within-group standard deviation.
+
+    For backward compatibility the value is still stored under the dictionary key
+    'cohens_d' and exported in CSV columns named 'd_*'; those labels refer to the
+    normalized mean difference defined here.
     """
     a = np.asarray(a, dtype=np.float64).ravel()
     b = np.asarray(b, dtype=np.float64).ravel()
@@ -668,7 +677,7 @@ def compute_metric_stats(grp_vals: dict[str, np.ndarray]) -> dict:
         for j, gj in enumerate(GROUPS):
             if i != j and gi in grp_vals and gj in grp_vals:
                 d_matrix[i, j] = abs(
-                    cohens_d(grp_vals[gi], grp_vals[gj], all_vals)
+                    normalized_mean_difference(grp_vals[gi], grp_vals[gj], all_vals)
                 )
 
     try:
@@ -703,7 +712,7 @@ def compute_metric_stats(grp_vals: dict[str, np.ndarray]) -> dict:
     for k, (ga, gb) in enumerate(PAIRS):
         p_raw = raw_p[k]
         p_adj = float(next(fdr_iter)) if not np.isnan(p_raw) else np.nan
-        d_val = cohens_d(
+        d_val = normalized_mean_difference(
             grp_vals.get(ga, np.array([])),
             grp_vals.get(gb, np.array([])),
             all_vals,
@@ -910,7 +919,7 @@ def plot_gradient_axis_figure(
     fig.text(
         0.5,
         -0.10,
-        "Axis: 1D MDS on pairwise Cohen's d  |  "
+        "Axis: 1D MDS on pairwise normalized mean difference (delta-mu / SD_all)  |  "
         "Brackets: FDR pairwise Mann-Whitney U  |  KW = omnibus (S1/S2/S3)",
         ha="center",
         fontsize=7,
