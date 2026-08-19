@@ -4,8 +4,8 @@
 Step 4: Behavioral Domain Enrichment Analysis
 
 Maps phenotypic measures from ABIDE to six harmonized behavioral domains and
-computes signed fold-change enrichment for each ASD subtype vs. the overall
-ASD sample.
+computes fold enrichment for each ASD subtype relative to the overall ASD
+sample.
 
 Domains:
   SCL     -- Social Communication
@@ -18,8 +18,10 @@ Domains:
 Standardization: robust Z-score (median / MAD); directionality harmonized so
 higher values = greater symptom burden.
 
-Enrichment: binary threshold at robust-Z > 1.0; signed log10 fold change
-relative to overall ASD prevalence.
+Enrichment: binary threshold at robust-Z > 1.0; fold enrichment is the ratio of
+within-subtype prevalence to overall ASD prevalence, plotted on a log scale
+(values > 1 indicate enrichment, values < 1 indicate depletion, midline = 1).
+Significance uses a directional (upper- or lower-tail) binomial test.
 
 Usage:
   python 04_behavior_enrichment.py \\
@@ -174,13 +176,24 @@ def bh_fdr(pvals: np.ndarray) -> np.ndarray:
     q[mask] = np.clip(qv_sorted, 0, 1)
     return q
 
-def per_subtype_enrichment_signed(asd_df: pd.DataFrame,
-                                  dom_df: pd.DataFrame,
-                                  labels: np.ndarray,
-                                  z_thr: float = 1.0,
-                                  min_n: int = 5,
-                                  baseline: str = "overall") -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
+def per_subtype_fold_enrichment(asd_df: pd.DataFrame,
+                                dom_df: pd.DataFrame,
+                                labels: np.ndarray,
+                                z_thr: float = 1.0,
+                                min_n: int = 5,
+                                baseline: str = "overall") -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Fold enrichment of elevated behavioral domains within each subtype.
+
+    Returns two data frames:
+      - enrichment: one row per domain x subtype, with 'fold' = within-subtype
+        prevalence / baseline prevalence (>1 enrichment, <1 depletion) and a
+        directional binomial p value.
+      - continuous: per-domain group mean comparison (Welch t test).
+
+    The column 'signed_fold' is retained as an internal plotting convenience
+    (depletion stored as -1/fold); after the log transform applied in
+    plot_fold_enrichment it is numerically identical to log10(fold), so the
+    figure axis is a plain log fold-enrichment scale centred on 1.
     """
     asd_df = asd_df.copy()
     asd_df["subtype"] = labels.astype(int)
@@ -258,7 +271,7 @@ def per_subtype_enrichment_signed(asd_df: pd.DataFrame,
 
     return df_sig, df_cont
 
-def plot_signed_enrichment(df_sig: pd.DataFrame, out_png: str, alpha_q: float = 0.05, point_size: int = 300):
+def plot_fold_enrichment(df_sig: pd.DataFrame, out_png: str, alpha_q: float = 0.05, point_size: int = 300):
     if df_sig.empty:
         print("No enrichment results to plot."); return
 
@@ -341,7 +354,7 @@ def plot_signed_enrichment(df_sig: pd.DataFrame, out_png: str, alpha_q: float = 
     ax.legend(handles, [f"ASD Subtype {int(k)+1}" for k in sorted(dfp["subtype"].unique())],
               frameon=False, loc="upper left", bbox_to_anchor=(1.02,1.0), fontsize=12)
 
-    ax.set_xlabel("Signed fold enrichment  [left=depleted, right=enriched]   (ticks show fold)", 
+    ax.set_xlabel("Fold enrichment (log scale; <1 = depletion, >1 = enrichment)", 
                   fontsize=14, fontweight='bold')
     ax.set_ylabel("", fontsize=14, fontweight='bold')
     plt.tight_layout()
@@ -380,19 +393,19 @@ def main():
     dom_df, used_cols = build_domain_scores(asd_df, z_method=args.z_method)
     dom_df.to_csv(os.path.join(args.outdir, "domain_composite_scores.csv"), index=False)
 
-    df_sig, df_cont = per_subtype_enrichment_signed(
+    df_sig, df_cont = per_subtype_fold_enrichment(
         asd_df, dom_df, labels,
         z_thr=args.z_thr, min_n=args.min_samples, baseline=args.baseline
     )
-    out_sig = os.path.join(args.outdir, "enrichment_signed.csv")
+    out_sig = os.path.join(args.outdir, "enrichment_fold.csv")
     out_cont = os.path.join(args.outdir, "enrichment_continuous.csv")
     df_sig.to_csv(out_sig, index=False)
     df_cont.to_csv(out_cont, index=False)
     print("Saved:", out_sig)
     print("Saved:", out_cont)
 
-    plot_signed_enrichment(df_sig, os.path.join(args.outdir, "fold_enrichment_signed.png"),
-                           alpha_q=args.alpha_q)
+    plot_fold_enrichment(df_sig, os.path.join(args.outdir, "fold_enrichment.png"),
+                         alpha_q=args.alpha_q)
 
     with open(os.path.join(args.outdir, "domain_matched_columns.txt"), "w") as f:
         for d, cols in used_cols.items():
